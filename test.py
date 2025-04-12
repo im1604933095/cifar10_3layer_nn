@@ -1,4 +1,4 @@
-# 测试脚本
+# 测试脚本（适配单隐藏层）
 import numpy as np
 from models.neural_net import ThreeLayerNN
 from train import load_data  # 确保从train.py导入load_data
@@ -10,15 +10,14 @@ def load_test_data():
     _, _, _, _, X_test, y_test = load_data(data_dir='data/cifar-10-batches-py')
     return X_test, y_test
 
-def test(weights_path, hidden_size1=256, hidden_size2=128):
+def test(weights_path, hidden_size=256):
     # 1. 加载测试数据
-    X_test, y_test = load_test_data()  # 关键修复点
+    X_test, y_test = load_test_data()
     
-    # 2. 初始化模型（必须与训练时的结构一致）
+    # 2. 初始化模型（单隐藏层结构）
     model = ThreeLayerNN(
         input_size=3072, 
-        hidden_size1=hidden_size1, 
-        hidden_size2=hidden_size2, 
+        hidden_size=hidden_size,  # 仅一个隐藏层参数
         output_size=10, 
         activation='relu'
     )
@@ -29,26 +28,15 @@ def test(weights_path, hidden_size1=256, hidden_size2=128):
     # 4. 预测并计算准确率
     y_pred = model.predict(X_test)
     acc = np.mean(y_pred == y_test)
-    print(f'Test Accuracy: {acc:.4f}')
 
+    # 5. 计算测试损失
     test_scores, _ = model.forward(X_test)
-    test_loss = cross_entropy_loss(test_scores, y_test, reg=0, params=model.params)
-    print(f'Test Loss: {test_loss:.4f}, Accuracy: {acc:.4f}')
-
-def visualize_weights(weights_path):
-    """可视化第一层权重（可选）"""
-    weights = np.load(weights_path, allow_pickle=True).item()
-    W1 = weights['W1']
-    
-    # 可视化代码
-    plt.figure(figsize=(12,8))
-    for i in range(100):
-        plt.subplot(10,10,i+1)
-        w_img = W1[:,i].reshape(32,32,3)
-        w_img = (w_img - w_img.min()) / (w_img.max() - w_img.min())
-        plt.imshow(w_img)
-        plt.axis('off')
-    plt.savefig('outputs/weight_visualization.png')
+    test_loss, _ = cross_entropy_loss(test_scores, y_test, reg=0, params=model.params)
+    print(f'Test Loss: {test_loss:.4f}, Test Accuracy: {acc:.4f}')
 
 if __name__ == '__main__':
-    test(weights_path='outputs/weights.npy')  # 示例调用
+    # 示例调用（需确保weights.npy是单隐藏层模型的权重）
+    weights_path = 'outputs/weights.npy'
+    
+    # 测试模型性能
+    test(weights_path=weights_path, hidden_size=512)  # 根据实际训练参数调整

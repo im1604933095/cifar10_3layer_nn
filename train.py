@@ -64,8 +64,14 @@ def load_data(data_dir='data/cifar-10-batches-py', val_ratio=0.1):
     # y_val = np.random.randint(0, 10, 5000)
     # return X_train, y_train, X_val, y_val, None, None
 
+# 余弦退火（比固定衰减更优）
+def cosine_lr(epoch, max_epochs, base_lr, warmup_ratio=0.1):
+    if epoch < max_epochs * warmup_ratio:
+        return base_lr * (epoch + 1) / (max_epochs * warmup_ratio)  # 线性预热
+    return 0.5 * base_lr * (1 + np.cos(np.pi * (epoch - max_epochs * warmup_ratio) / (max_epochs * (1 - warmup_ratio))))
+
 def train(hidden_size=256, activation='relu',
-         lr=0.01, reg=0.001, epochs=100, batch_size=256, patience=5):    # 加载数据
+         lr=0.01, reg=0.001, epochs=100, batch_size=256, patience=10, is_search=False):    # 加载数据
     X_train, y_train, X_val, y_val, X_test, y_test = load_data()
     
     # 初始化模型（修正隐藏层参数）
@@ -78,13 +84,24 @@ def train(hidden_size=256, activation='relu',
     # 训练状态跟踪
     best_val_acc = 0.0
     no_improve = 0
+    initial_lr = lr  # 初始学习率（保持固定）
     train_losses = []
+    val_losses = []
     val_acc_history = []
     
     # 训练循环
-    for epoch in range(epochs):
+    for epoch in range(epochs):  # 未来可考虑把这一块拉到外面，作为一个函数train_one_epoch
         # Mini-batch训练
         indices = np.random.permutation(X_train.shape[0])
+        epoch_loss = 0
+        num_batches = 0
+        # 计算当前学习率（始终基于initial_lr）
+        if is_search:
+            # 固定学习率衰减（每轮衰减5%）
+            current_lr = initial_lr * (0.95 ** epoch)
+        else:
+            # 正式训练用余弦退火
+            current_lr = cosine_lr(epoch, epochs, initial_lr)
         for i in range(0, X_train.shape[0], batch_size):
             batch_idx = indices[i:i+batch_size]
             X_batch, y_batch = X_train[batch_idx], y_train[batch_idx]
@@ -98,44 +115,97 @@ def train(hidden_size=256, activation='relu',
             
             # 参数更新
             for param in model.params:
-                model.params[param] -= lr * grads[param]
+                model.params[param] -= current_lr * grads[param]
+            # model.params = {k: v - current_lr * grads[k] for k, v in model.params.items()}  # 向量化操作更快
+
+            epoch_loss += loss
+            num_batches += 1
         
         # 验证评估
         val_pred = model.predict(X_val)
         val_acc = compute_accuracy(val_pred, y_val)
         val_acc_history.append(val_acc)
-        train_losses.append(loss)
+
+        # 计算平均训练损失
+        train_loss = epoch_loss / num_batches
+        train_losses.append(train_loss)
         
+        # 验证集评估（新增损失计算）
+        val_scores, _ = model.forward(X_val)
+        val_loss, _ = cross_entropy_loss(val_scores, y_val, model.reg, model.params)
+        val_losses.append(val_loss)
+        
+        # if epoch % 5 == 0 or (epoch+1) % 5 == 0:  # 每5个epoch备份一次
+        #     backup_path = f'outputs/backup_epoch{epoch+1}.npy'
+        #     np.save(backup_path, model.params)
+        #     print(f"Backup model at epoch {epoch+1} to {backup_path}")
+
         # 早停机制
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            os.makedirs('outputs', exist_ok=True)  # 确保目录存在
             np.save('outputs/weights.npy', model.params)
+            print(f"Best model updated at epoch {epoch+1}, Val Acc={best_val_acc:.4f}")
             no_improve = 0
         else:
             no_improve += 1
-            if no_improve >= patience:
+            if no_improve >= patience and epoch > 15:
                 print(f"Early stopping at epoch {epoch}")
                 break
-        
-        # 学习率衰减
-        lr *= 0.95
-        
+
         # 打印进度
-        print(f"Epoch {epoch+1}/{epochs}: Loss={loss:.4f}, Val Acc={val_acc:.4f}, Best={best_val_acc:.4f}")
-    
-    # 保存训练曲线
-    plt.figure(figsize=(12,4))
-    plt.subplot(121)
-    plt.plot(train_losses, label='Train Loss')
-    plt.xlabel('Epoch')
-    plt.legend()
-    
-    plt.subplot(122)
-    plt.plot(val_acc_history, label='Val Acc')
-    plt.xlabel('Epoch')
-    plt.legend()
-    plt.savefig('outputs/train_curve.png')
-    plt.close()
+        print(f"Epoch {epoch+1}/{epochs}: Cur LR={current_lr:.4f}, Train Loss={train_loss:.4f}, Val Loss={loss:.4f}, Val Acc={val_acc:.4f}, Best={best_val_acc:.4f}")
+           
+    if not is_search:
+        # 可视化部分
+        plt.figure(figsize=(15, 5))
+
+        # 损失曲线 (左图)
+        plt.subplot(131)
+        plt.plot(train_losses, 'b-', linewidth=2, label='Train Loss')
+        plt.plot(val_losses, 'r--', linewidth=2, label='Val Loss')
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.title('Training & Validation Loss', fontsize=14)
+
+        # 准确率曲线 (中图)
+        plt.subplot(132)
+        plt.plot(val_acc_history, 'g-', linewidth=2)
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Accuracy', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.ylim([0.3, 0.7])
+        plt.title('Validation Accuracy', fontsize=14)
+
+        # 权重分布 (右图)
+        plt.subplot(133)
+        weights = np.concatenate([model.params['W1'].flatten(), 
+                                model.params['W2'].flatten()])
+        plt.hist(weights, bins=50, color='purple', alpha=0.7)
+        plt.axvline(x=0, color='k', linestyle='--', linewidth=1)
+        plt.xlabel('Weight Value', fontsize=12)
+        plt.ylabel('Count', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.title(f'Weight Distribution\n(μ={weights.mean():.3f}, σ={weights.std():.3f})', fontsize=14)
+        plt.tight_layout()
+        plt.savefig('outputs/training_metrics.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+        plt.figure(figsize=(12, 12))
+        W1 = model.params['W1']
+        for i in range(16):
+            plt.subplot(4, 4, i+1)
+            # 归一化到[0,1]并转换为RGB
+            neuron = W1[:, i].reshape(32, 32, 3)
+            neuron = (neuron - neuron.min()) / (neuron.max() - neuron.min() + 1e-8)
+            plt.imshow(neuron)
+            plt.axis('off')
+            plt.title(f'Neuron {i+1}', fontsize=8)
+        plt.suptitle('First Layer Weight Patterns', y=0.92, fontsize=16)
+        plt.savefig('outputs/layer1_patterns.png', dpi=300)
+        plt.close()
     
     return best_val_acc  # 返回整个训练过程中的最佳验证准确率
 
@@ -152,7 +222,7 @@ def grad_check():
     X_batch, y_batch = X_train[:2000], y_train[:2000]
     
     # 初始化临时模型（关闭正则化）
-    act = 'relu'
+    act = 'sigmoid'
     # 初始化模型参数（单隐藏层）
     model = ThreeLayerNN(
         input_size=3072, 
@@ -168,29 +238,43 @@ def grad_check():
     gradient_check(model, X_batch, y_batch)
     print("✅ 梯度检查通过！")
 
-if __name__ == '__main__':
-    test_load_data()  # 先测试数据加载
-    grad_check()
-    # # 命令行参数解析
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--hidden_size1', type=int, default=256)
-    # parser.add_argument('--hidden_size2', type=int, default=128)
-    # parser.add_argument('--activation', type=str, default='relu')
-    # parser.add_argument('--lr', type=float, default=0.01)
-    # parser.add_argument('--reg', type=float, default=0.001)
-    # parser.add_argument('--epochs', type=int, default=100)
-    # parser.add_argument('--batch_size', type=int, default=256)
-    # parser.add_argument('--patience', type=int, default=5)
-    # args = parser.parse_args()
+def visualize_weights(weights_path, img_shape=(32, 32, 3)):
+    """可视化第一层兼容字典或数组输入）"""
+    # 加载权重
+    weights = np.load(weights_path, allow_pickle=True)
     
-    # # 启动训练
-    # train(
-    #     hidden_size1=args.hidden_size1,
-    #     hidden_size2=args.hidden_size2,
-    #     activation=args.activation,
-    #     lr=args.lr,
-    #     reg=args.reg,
-    #     epochs=args.epochs,
-    #     batch_size=args.batch_size,
-    #     patience=args.patience
-    # )
+    # 处理不同存储格式
+    if isinstance(weights, np.ndarray):
+        w1 = weights  # 直接是数组
+    elif isinstance(weights, dict):
+        w1 = weights['W1']  # 字典格式
+    else:
+        raise ValueError("Unsupported weights format")
+    
+    # 可视化
+    plt.figure(figsize=(12, 6))
+    for i in range(16):
+        plt.subplot(4, 4, i+1)
+        channel = w1[:, i].reshape(img_shape)
+        channel = (channel - channel.min()) / (channel.max() - channel.min() + 1e-8)
+        plt.imshow(channel)
+        plt.axis('off')
+    plt.savefig('outputs/w1_visual.png')
+    plt.close()
+
+if __name__ == '__main__':
+    # test_load_data()  # 先测试数据加载
+    # grad_check()
+    
+    with open('outputs/best_params.txt') as f:
+        best_params = eval(f.read())
+    # 添加必要参数
+    best_params.update({
+        'epochs': 50,        # 正式训练使用更多epoch
+        'lr': best_params['lr'] * 1.2,  # 适当提升初始学习率（因余弦退火会快速下降）
+        'batch_size': best_params['batch_size'] * 2,   # 增大批量大小（同步调整学习率）
+        'patience': 10,       # 增大早停耐心值
+        'is_search': False   # 关闭搜索模式
+    })
+    # 启动正式训练
+    train(**best_params)

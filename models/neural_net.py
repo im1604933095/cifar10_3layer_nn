@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import relu, relu_grad
+from .utils import relu, sigmoid
 
 class ThreeLayerNN:
     def __init__(self, input_size, hidden_size, output_size, activation='relu', reg=0.0):  # 隐藏层参数减为1个
@@ -13,11 +13,9 @@ class ThreeLayerNN:
         self.reg = reg
 
     def forward(self, X):
-        # 隐藏层
+        # 单隐藏层计算
         z1 = X.dot(self.params['W1']) + self.params['b1']
-        a1 = relu(z1)
-        
-        # 输出层
+        a1 = relu(z1) if self.activation == 'relu' else sigmoid(z1)
         scores = a1.dot(self.params['W2']) + self.params['b2']
         return scores, (X, z1, a1)
 
@@ -28,7 +26,7 @@ class ThreeLayerNN:
         # 计算交叉熵梯度
         exp_scores = np.exp(scores - np.max(scores, axis=1, keepdims=True))
         probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
-        dscores = probs
+        dscores = probs.copy()
         dscores[range(num_samples), y] -= 1
         dscores /= num_samples
 
@@ -40,7 +38,10 @@ class ThreeLayerNN:
 
         # 隐藏层梯度
         dhidden = dscores.dot(self.params['W2'].T)
-        dhidden[z1 <= 0] = 0  # ReLU梯度
+        if self.activation == 'relu':
+            dhidden *= (z1 > 0)
+        elif self.activation == 'sigmoid':
+            dhidden *= (a1 * (1 - a1))
 
         grads['W1'] = X.T.dot(dhidden) + self.reg * self.params['W1']
         grads['b1'] = np.sum(dhidden, axis=0)
