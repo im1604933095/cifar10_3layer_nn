@@ -1,1 +1,0 @@
-# cifar10_3layer_nn

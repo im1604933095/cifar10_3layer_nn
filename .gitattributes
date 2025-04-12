@@ -1,0 +1,5 @@
+# 对特定文件禁用转换
+*.ipynb -text
+*.html -text
+# 对其他文件启用标准化
+* text=auto
