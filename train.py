@@ -6,7 +6,6 @@ from models.utils import cross_entropy_loss, compute_accuracy
 import pickle
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-import argparse
 
 os.environ["OMP_NUM_THREADS"] = "4"  # 根据CPU核心数调整（i5通常为4核）
 os.environ["MKL_NUM_THREADS"] = "4"

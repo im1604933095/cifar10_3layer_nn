@@ -1,9 +1,3 @@
-## 项目结构
-- `models/`: 神经网络核心实现
-- `outputs/`: 训练结果（权重+可视化）
-- `notebooks/`: 实验分析笔记
-
-## 快速开始
-1. 安装依赖: `pip install -r requirements.txt`
-2. 训练模型: `python train.py`
-3. 测试模型: `python test.py --weights outputs/weights.npy`
+numpy>=1.21.0        # 数值计算库（代码中多次导入）
+scikit-learn>=1.0.0  # 机器学习工具（用于 train_test_split）
+matplotlib>=3.5.0    # 绘图库（用于 plt 可视化）
