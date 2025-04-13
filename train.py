@@ -149,7 +149,7 @@ def train(hidden_size=256, activation='relu',
             no_improve = 0
         else:
             no_improve += 1
-            if no_improve >= patience and epoch > 15:
+            if no_improve >= patience and epoch > 15 and epoch < epochs - 10:
                 print(f"Early stopping at epoch {epoch}")
                 break
 
@@ -272,7 +272,7 @@ if __name__ == '__main__':
     best_params.update({
         'epochs': 50,        # 正式训练使用更多epoch
         'lr': best_params['lr'] * 1.2,  # 适当提升初始学习率（因余弦退火会快速下降）
-        'batch_size': best_params['batch_size'] * 2,   # 增大批量大小（同步调整学习率）
+        'batch_size': int(best_params['batch_size'] * 1.5),   # 增大批量大小（同步调整学习率）
         'patience': 10,       # 增大早停耐心值
         'is_search': False   # 关闭搜索模式
     })
